@@ -6,6 +6,14 @@ import numpy as np
 import os
 import time
 
+import argparse
+
+parser = argparse.ArgumentParser(
+            description='Train a text generation model')
+
+parser.add_argument('-f', '--file', metavar='file', help='file the model will be trained on')
+parser.add_argument('-n', '--name', metavar='name', help='the name of the model')
+
 def load_file(file_path):
         
     # parse text file:
@@ -48,17 +56,44 @@ def construct_network(vocab_size, batch_size, embedding_dim=256, rnn_units=1024)
         # append decision layer:
         tf.keras.layers.Dense(vocab_size)
     ])
-    
+        
     return network;    
 
 def network_loss(labels, logits):
     return tf.keras.losses.sparse_categorical_crossentropy(
         labels, logits, from_logits=True)
 
+def generate_text(model, seed, 
+        char2idx, idx2char, output_len=100,
+        entropy=1.0):
+
+    # vectorize seed string:
+    input_eval = tf.expand_dims([ char2idx[s] for s in seed ],0)
+
+    text_generated = []
+    model.reset_states()
+    for i in range(output_len):
+        predictions = model(input_eval)
+        predictions = tf.squeeze(predictions, 0) / entropy
+        predicted_val = \
+            tf.random.categorical(predictions, num_samples=1)[-1,0].numpy()
+        
+        # add newly generated character to model:
+        input_eval = tf.expand_dims([predicted_id], 0)
+        text_generated.append(idx2char[predicted_id])
+
+    # return result:
+    return seed + ''.join(text_generated)
+
+
+
+
 def main():
     
-    
-    file_in = 'shakespeare.txt' 
+    args = parser.parse_args()
+
+    file_in = args.file
+    model_name = args.name
     seq_len = 100
     batch_size = 64
     n_epochs = 10
@@ -68,16 +103,28 @@ def main():
     
     # construct sequences from dataset:
     seq_dataset = construct_dataset(data, seq_len, batch_size)
-     
+    
+    # build network: 
     network = construct_network(len(vocab), batch_size)
     network.summary()
-
+    
     # compile network:
     network.compile(optimizer='adam', loss=network_loss)
     
-    history = network.fit(seq_dataset, epochs=n_epochs)
+    # add checkpoint directory:
+    checkpoint_dir = f'./{model_name}'
+    checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt_{epoch}")
+    checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+        filepath=checkpoint_prefix,
+        save_weights_only=True)     
 
-    print(seq_dataset)
+    # train model:
+    history = network.fit(seq_dataset, epochs=n_epochs)
+    
+
+    print(generate_text(model, seed=u"ROMEO: ", 
+                        char2idx=char2idx, 
+                        idx2char=idx2char))
     
 if __name__ == '__main__':
     main()        
