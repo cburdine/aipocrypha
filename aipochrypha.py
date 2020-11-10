@@ -8,6 +8,9 @@ import time
 
 import argparse
 
+physical_devices = tf.config.list_physical_devices('GPU')
+tf.config.experimental.set_memory_growth(physical_devices[0], True)
+
 parser = argparse.ArgumentParser(
             description='Train a text generation model')
 
@@ -68,7 +71,8 @@ def generate_text(model, seed,
         entropy=1.0):
 
     # vectorize seed string:
-    input_eval = tf.expand_dims([ char2idx[s] for s in seed ],0)
+    input_eval = [ char2idx[s] for s in seed ]
+    input_eval = tf.expand_dims(input_eval, 0)
 
     text_generated = []
     model.reset_states()
@@ -79,9 +83,9 @@ def generate_text(model, seed,
             tf.random.categorical(predictions, num_samples=1)[-1,0].numpy()
         
         # add newly generated character to model:
-        input_eval = tf.expand_dims([predicted_id], 0)
-        text_generated.append(idx2char[predicted_id])
-
+        input_eval = tf.expand_dims([predicted_val], 0)
+        text_generated.append(idx2char[predicted_val])
+    
     # return result:
     return seed + ''.join(text_generated)
 
@@ -119,10 +123,16 @@ def main():
         save_weights_only=True)     
 
     # train model:
-    history = network.fit(seq_dataset, epochs=n_epochs)
+    history = network.fit(seq_dataset, epochs=n_epochs, callbacks=[checkpoint_callback])
     
+    # rebuild model with weights to take one input at a time:
+    network = construct_network(len(vocab), 1)
+    network.load_weights(tf.train.latest_checkpoint(checkpoint_dir)) 
+    network.build(tf.TensorShape([1,None]))
+    
+    text_seed = 'In those days there was no king in Israel: every man did that which was right in his own eyes.'
 
-    print(generate_text(model, seed=u"ROMEO: ", 
+    print(generate_text(network, seed=text_seed, 
                         char2idx=char2idx, 
                         idx2char=idx2char))
     
